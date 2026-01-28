@@ -1,4 +1,4 @@
-2<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -519,7 +519,7 @@
             let sortableInstance = null; let unsplashPage = 1; let itinCount = 0; let categoriesLoaded = false;
 
             function getAuthHeader(user, pass) { return 'Basic ' + btoa(unescape(encodeURIComponent(user + ':' + pass))); }
-            function escapeHTML(str) { return String(str || '').replace(/[&<>'"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',''':'&#39;'}[s])); }
+            function escapeHTML(str) { return String(str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s])); }
             function sanitizeHTML(html) {
                 if (typeof DOMPurify === 'undefined') return html;
                 return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['h1','h2','h3','p','ul','ol','li','strong','em','b','i','a','img','blockquote','br'], ALLOWED_ATTR: ['href','src','alt','title','style','target','rel'] });
