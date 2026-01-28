@@ -1,0 +1,711 @@
+<!-- 
+  [Admin Dashboard v3.13 - Post Reorder Meta]
+  
+  - Version: 3.13
+
+  - Date: 2026.01.27
+  - Author: Gemini Helper
+  
+  [Change Log]
+  v3.13:
+    1. [Fix] Post Reorder:
+       - 정렬 전용 메타(_kedit_order) 저장 및 meta_value_num 정렬 적용.
+       - menu_order 미지원 환경에서도 순서 저장 유지.
+  v3.12:
+    1. [Fix] Post Reorder:
+       - menu_order 미지원 시 date 정렬로 자동 fallback하여 목록 로드 실패 방지.
+  v3.11:
+    1. [Fix] Post Reorder:
+       - 정렬 기준을 menu_order로 전환하고 저장/조회에 반영.
+       - 최신 순서가 목록 갱신 시 유지되도록 orderby=menu_order 적용.
+  v3.10:
+    1. [Fix] Post Reorder:
+       - WP 저장 시 date_gmt/date 동시 업데이트 및 ISO 타임존 적용으로 순서 저장 반영 강화.
+       - 목록 조회 시 정렬 파라미터 명시.
+  v3.9:
+    1. [Fix] AI Writer:
+       - 이미지 플레이스홀더([IMG0]) 치환 로직 강화 (이미지가 텍스트 설명으로 대체되는 문제 해결).
+       - 프롬프트에 이미지 삽입 위치 강제 지시.
+    2. [Fix] Post Reorder:
+       - 'date_gmt' 필드 사용으로 시간대(Timezone) 무관한 절대 정렬 구현.
+    3. [Feature] SEO Advisor:
+       - 현재 글 내용 기반 SEO 점수, 추천 제목, 개선점 제안 기능 추가 (Gemini API).
+    4. [Fix] WP Publish:
+       - 발행 실패 원인(페이로드 등) 분석 및 에러 핸들링 강화.
+  v3.8: Date-based Sorting.
+-->
+<div id="k-admin-wrapper" class="k-scope">
+    <!-- 1. 라이브러리 로드 -->
+    <link rel="stylesheet" href="tailwind.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+    <link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Quill Editor -->
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        /* [Scoped CSS Reset & Isolation] */
+        #k-admin-wrapper {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            line-height: 1.5;
+            font-size: 16px;
+            position: relative;
+            display: flex;
+            width: 100%;
+            max-width: 100%;
+            height: 950px;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            box-sizing: border-box;
+            text-align: left;
+            margin: 20px 0;
+        }
+
+        #k-admin-wrapper *, #k-admin-wrapper *::before, #k-admin-wrapper *::after {
+            box-sizing: border-box;
+            border-width: 0;
+            border-style: solid;
+            border-color: #e2e8f0;
+        }
+
+        /* WP Theme Reset */
+        #k-admin-wrapper h1, #k-admin-wrapper h2, #k-admin-wrapper h3, 
+        #k-admin-wrapper h4, #k-admin-wrapper h5, #k-admin-wrapper h6 { margin: 0 0 0.5rem 0; font-weight: inherit; line-height: inherit; color: inherit; }
+        #k-admin-wrapper p { margin: 0 0 1em 0; }
+        #k-admin-wrapper ul, #k-admin-wrapper ol { list-style: none; margin: 0; padding: 0; }
+        #k-admin-wrapper li { margin: 0; padding: 0; list-style-type: none; border: none; }
+        #k-admin-wrapper a { text-decoration: none; color: inherit; box-shadow: none; border: none; }
+        #k-admin-wrapper img { max-width: 100%; height: auto; display: block; }
+        
+        /* Form Reset */
+        #k-admin-wrapper input, #k-admin-wrapper textarea, #k-admin-wrapper select {
+            font-family: inherit; font-size: 1rem; margin: 0; padding: 0; 
+            box-shadow: none; border-radius: 0; background-color: white; color: #1e293b;
+        }
+        #k-admin-wrapper button { background: none; border: none; padding: 0; cursor: pointer; }
+
+        /* Utilities */
+        #k-admin-wrapper .hidden { display: none !important; }
+        #k-admin-wrapper .block { display: block !important; }
+        #k-admin-wrapper .fade-in { animation: adminFadeIn 0.3s ease-out; }
+        @keyframes adminFadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Navigation */
+        #k-admin-wrapper .nav-item {
+            display: flex; align-items: center; gap: 0.75rem;
+            padding: 0.75rem 1rem; margin-bottom: 0.25rem;
+            border-radius: 0.5rem; font-weight: 600; font-size: 0.9rem;
+            color: #64748b; transition: all 0.2s; cursor: pointer;
+        }
+        #k-admin-wrapper .nav-item:hover { background-color: #f1f5f9; color: #0f172a; }
+        #k-admin-wrapper .nav-item.active { background-color: #0f172a; color: white; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        
+        /* Components */
+        #k-admin-wrapper .input-modern {
+            width: 100%; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.75rem;
+            background-color: #fff; transition: all 0.2s; font-size: 0.95rem;
+        }
+        #k-admin-wrapper .input-modern:focus { outline: none; border-color: #0f172a; box-shadow: 0 0 0 1px #0f172a; }
+        
+        #k-admin-wrapper .input-underline {
+            width: 100%; border: none; border-bottom: 2px solid #e2e8f0; padding: 0.5rem 0;
+            background: transparent; font-size: 1.5rem; font-weight: 700; transition: border-color 0.2s;
+        }
+        #k-admin-wrapper .input-underline:focus { outline: none; border-color: #0f172a; }
+        
+        #k-admin-wrapper select.input-modern {
+            appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.5rem center; background-repeat: no-repeat;
+            background-size: 1.5em 1.5em; padding-right: 2.5rem;
+        }
+
+        #k-admin-wrapper .btn { 
+            padding: 0.6rem 1.5rem; border-radius: 0.5rem; border: 1px solid transparent; 
+            font-weight: 600; font-size: 0.9rem; transition: all 0.2s; 
+            display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; 
+            cursor: pointer; line-height: 1.2; text-decoration: none; 
+        }
+        #k-admin-wrapper .btn-primary { background-color: #0f172a; color: white; border-color: #0f172a; }
+        #k-admin-wrapper .btn-primary:hover { background-color: #334155; color: white; }
+        #k-admin-wrapper .btn-secondary { background-color: white; border-color: #e2e8f0; color: #475569; }
+        #k-admin-wrapper .btn-secondary:hover { background-color: #f8fafc; border-color: #cbd5e1; color: #475569; }
+        #k-admin-wrapper .btn-gradient { background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); color: white; border: none; }
+        #k-admin-wrapper .btn-gradient:hover { opacity: 0.9; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4); transform: translateY(-1px); }
+        #k-admin-wrapper .btn-green { background-color: #10b981; color: white; border-color: #10b981; }
+        #k-admin-wrapper .btn-green:hover { background-color: #059669; }
+        #k-admin-wrapper .btn-xs { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+
+        /* Quill & Scrollbar */
+        #k-admin-wrapper .ql-toolbar { border-top-left-radius: 0.5rem; border-top-right-radius: 0.5rem; border: 1px solid #e2e8f0 !important; background-color: #fff; }
+        #k-admin-wrapper .ql-container { border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem; border: 1px solid #e2e8f0 !important; border-top: 0 !important; background-color: white; font-family: 'Pretendard', sans-serif; font-size: 1rem; min-height: 400px; }
+        #k-admin-wrapper .ql-editor { min-height: 400px; }
+        #k-admin-wrapper ::-webkit-scrollbar { width: 6px; }
+        #k-admin-wrapper ::-webkit-scrollbar-track { background: transparent; }
+        #k-admin-wrapper ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+        /* Post Card */
+        #k-admin-wrapper .post-card {
+            display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1rem; 
+            border: 1px solid #e2e8f0; border-radius: 0.5rem; background: white; 
+            margin-bottom: 0.5rem; cursor: default; transition: all 0.2s;
+        }
+        #k-admin-wrapper .post-card:hover { border-color: #94a3b8; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        #k-admin-wrapper .post-card .handle { cursor: grab; color: #cbd5e1; padding: 0.5rem; flex-shrink: 0; }
+        #k-admin-wrapper .post-card .handle:hover { color: #3b82f6; }
+        #k-admin-wrapper .post-card.sortable-ghost { opacity: 0.5; background: #f1f5f9; border-style: dashed; }
+    </style>
+
+    <!-- 2. 왼쪽 사이드바 -->
+    <aside class="w-64 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col z-10 shadow-sm text-left relative">
+        <div class="h-16 flex items-center px-6 border-b border-slate-100 flex-shrink-0">
+            <span class="font-bold text-xl tracking-tight text-slate-900">THE K-EDIT</span>
+            <span class="ml-2 text-[10px] font-extrabold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">v3.9</span>
+        </div>
+        
+        <nav class="p-4 flex-1 overflow-y-auto text-left">
+            <div class="mb-6">
+                <p class="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Content</p>
+                <div onclick="kAdmin.nav('editions')" id="nav-editions" class="nav-item active">
+                    <i class="fas fa-suitcase-rolling w-5 text-center"></i> Editions
+                </div>
+                <div onclick="kAdmin.nav('journal')" id="nav-journal" class="nav-item">
+                    <i class="fas fa-newspaper w-5 text-center"></i> Journal
+                </div>
+            </div>
+            
+            <div class="mb-6">
+                <p class="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Design</p>
+                <div onclick="kAdmin.nav('hero')" id="nav-hero" class="nav-item">
+                    <i class="fas fa-desktop w-5 text-center"></i> Hero & Footer
+                </div>
+                <div onclick="kAdmin.nav('instagram')" id="nav-instagram" class="nav-item">
+                    <i class="fab fa-instagram w-5 text-center"></i> Instagram
+                </div>
+            </div>
+
+            <div>
+                <p class="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">System</p>
+                <div onclick="kAdmin.nav('settings')" id="nav-settings" class="nav-item">
+                    <i class="fas fa-cog w-5 text-center"></i> Settings
+                </div>
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-slate-100 bg-slate-50 flex-shrink-0">
+            <div class="flex items-center gap-2 text-xs font-medium text-slate-600">
+                <div id="status-dot" class="w-2 h-2 rounded-full bg-red-400 transition-colors"></div>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 3. 메인 콘텐츠 영역 -->
+    <main class="flex-1 min-w-0 overflow-y-auto relative scroll-smooth bg-slate-50 text-left">
+        <div class="w-full max-w-full mx-auto p-8">
+            
+            <!-- [PANEL 1] Tour Editions -->
+            <div id="panel-editions" class="panel-content block">
+                <header class="flex justify-between items-end mb-8">
+                    <div>
+                        <h1 class="text-3xl font-bold text-slate-900 tracking-tight m-0">Tour Editions</h1>
+                        <p class="text-slate-500 mt-1 m-0">투어 상품의 가격, 상세 내용, 그리고 <span class="text-blue-600 font-bold">상세 일정(Itinerary)</span>을 관리합니다.</p>
+                    </div>
+                </header>
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="flex border-b border-slate-100 bg-slate-50/50 p-2 gap-2 overflow-x-auto">
+                        <button onclick="kAdmin.loadEdition('trend')" class="edition-tab px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:text-slate-900 hover:bg-white transition whitespace-nowrap border border-transparent" id="tab-trend">1. Trend Edit</button>
+                        <button onclick="kAdmin.loadEdition('gourmet')" class="edition-tab px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:text-slate-900 hover:bg-white transition whitespace-nowrap border border-transparent" id="tab-gourmet">2. Gourmet Edit</button>
+                        <button onclick="kAdmin.loadEdition('heritage')" class="edition-tab px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:text-slate-900 hover:bg-white transition whitespace-nowrap border border-transparent" id="tab-heritage">3. Heritage Edit</button>
+                        <button onclick="kAdmin.loadEdition('school')" class="edition-tab px-4 py-2 rounded-lg text-sm font-bold text-blue-600 hover:bg-white transition whitespace-nowrap border border-transparent" id="tab-school">4. Future Edit</button>
+                    </div>
+                    <div class="p-8">
+                        <div id="edition-placeholder" class="text-center py-20">
+                            <div class="text-slate-300 text-5xl mb-4"><i class="fas fa-mouse-pointer"></i></div>
+                            <p class="text-slate-400">상단의 탭을 눌러 수정할 상품을 선택하세요.</p>
+                        </div>
+                        <form id="edition-form" class="hidden space-y-8 fade-in">
+                            <input type="hidden" id="ed-id">
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2 m-0"><span class="bg-slate-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">1</span> 기본 정보</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div class="md:col-span-2"><label class="label-modern">Tour Title</label><input type="text" id="ed-title" class="input-modern font-serif text-lg"></div>
+                                    <div><label class="label-modern">Subtitle</label><input type="text" id="ed-subtitle" class="input-modern"></div>
+                                    <div><label class="label-modern">Price (USD)</label><input type="number" id="ed-price" class="input-modern"></div>
+                                </div>
+                            </div>
+                            <hr class="border-slate-100 my-6">
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2 m-0"><span class="bg-slate-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">2</span> 상세 내용</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div><label class="label-modern">Description</label><textarea id="ed-desc" class="input-modern h-32 resize-none"></textarea></div>
+                                    <div><label class="label-modern">Key Points</label><textarea id="ed-points" class="input-modern h-32 resize-none font-mono text-sm bg-slate-50"></textarea></div>
+                                </div>
+                            </div>
+                            <hr class="border-slate-100 my-6">
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2 m-0"><span class="bg-slate-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">3</span> 커버 이미지</h3>
+                                <div class="grid grid-cols-2 gap-6">
+                                    <div class="cursor-pointer group" onclick="kAdmin.openImagePicker('ed-img1')"><label class="label-modern cursor-pointer hover:text-blue-600">Cover Image 1 <i class="fas fa-edit"></i></label><div class="relative aspect-video bg-slate-100 rounded-lg overflow-hidden border border-slate-200 group-hover:border-blue-500 transition"><input type="hidden" id="ed-img1"><img id="prev-ed-img1" class="w-full h-full object-cover"></div></div>
+                                    <div class="cursor-pointer group" onclick="kAdmin.openImagePicker('ed-img2')"><label class="label-modern cursor-pointer hover:text-blue-600">Cover Image 2 <i class="fas fa-edit"></i></label><div class="relative aspect-video bg-slate-100 rounded-lg overflow-hidden border border-slate-200 group-hover:border-blue-500 transition"><input type="hidden" id="ed-img2"><img id="prev-ed-img2" class="w-full h-full object-cover"></div></div>
+                                </div>
+                            </div>
+                            <hr class="border-slate-100 my-6">
+                            
+                            <!-- [Itinerary Section] -->
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2 m-0"><span class="bg-slate-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">4</span> 상세 일정 (Itinerary)</h3>
+                                <p class="text-xs text-slate-500 mb-4">드래그하여 순서를 변경할 수 있습니다. 이미지는 선택 사항입니다.</p>
+                                
+                                <div id="itin-list" class="space-y-4"></div>
+                                
+                                <button type="button" onclick="kAdmin.addItineraryDay()" class="btn btn-secondary w-full border-dashed mt-4">
+                                    <i class="fas fa-plus mr-2 text-blue-500"></i> 일정 추가 (Add Day)
+                                </button>
+                            </div>
+
+                            <div class="flex justify-end pt-8 border-t border-slate-100 sticky bottom-0 bg-white/90 backdrop-blur pb-4 z-10">
+                                <button type="button" onclick="kAdmin.saveEdition()" class="btn btn-primary px-10 py-3 text-lg shadow-xl hover:shadow-2xl transform hover:-translate-y-1">모든 변경사항 저장</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- [PANEL 2] WP Journal -->
+            <div id="panel-journal" class="panel-content hidden">
+                <header class="flex justify-between items-center mb-6">
+                    <div>
+                        <h1 class="text-3xl font-bold text-slate-900 tracking-tight m-0">Journal</h1>
+                        <p class="text-slate-500 mt-1 m-0">워드프레스 글 작성 및 AI 자동 생성</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="kAdmin.openAIModal()" class="btn btn-gradient shadow-lg"><i class="fas fa-robot mr-2"></i> AI Auto-Write</button>
+                        <button onclick="kAdmin.newPost()" class="btn btn-secondary"><i class="fas fa-plus text-blue-500"></i> 새 글 쓰기</button>
+                    </div>
+                </header>
+                <!-- Journal Form -->
+                <form id="wp-form">
+                    <div class="flex flex-col xl:flex-row gap-8 items-start">
+                        <div class="flex-1 w-full min-w-0 space-y-6">
+                            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 space-y-6 relative">
+                                <div id="edit-mode-indicator" class="hidden absolute top-0 left-0 w-full bg-blue-50 text-blue-700 px-8 py-2 text-sm font-bold border-b border-blue-100 rounded-t-xl flex justify-between items-center">
+                                    <span><i class="fas fa-edit"></i> 글 수정 모드</span>
+                                    <button type="button" onclick="kAdmin.newPost()" class="text-xs underline hover:text-blue-900">취소 및 새 글</button>
+                                </div>
+                                <input type="hidden" id="wp-post-id"> 
+                                <div class="mt-6">
+                                    <div class="flex justify-between items-center">
+                                        <input type="text" id="wp-title" class="input-underline flex-1" placeholder="여기에 제목을 입력하세요">
+                                        <!-- [v3.9] SEO Advisor Button -->
+                                        <button type="button" onclick="kAdmin.analyzeSEO()" class="ml-4 btn btn-secondary btn-xs border-green-500 text-green-600 hover:bg-green-50">
+                                            <i class="fas fa-search-plus mr-1"></i> SEO Advisor
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="h-[400px]"><div id="wp-editor"></div></div>
+                            </div>
+                            <!-- Post List -->
+                            <div class="mt-12">
+                                <div class="flex justify-between items-center mb-4">
+                                    <div>
+                                        <h3 class="text-xl font-bold text-slate-900 m-0">Recent Posts & Reorder</h3>
+                                        <p class="text-xs text-slate-500 m-0 mt-1">드래그하여 순서를 변경한 후 '순서 저장'을 누르세요.<br><strong class="text-blue-600">* 순서 저장 시 게시물의 '발행 시간'이 재설정됩니다 (v3.9: 절대 시간 정렬).</strong></p>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <button type="button" onclick="kAdmin.loadPosts()" class="btn btn-secondary btn-xs"><i class="fas fa-sync-alt"></i> 목록 갱신</button>
+                                        <button type="button" onclick="kAdmin.savePostOrder()" class="btn btn-primary btn-xs"><i class="fas fa-sort"></i> 순서 저장</button>
+                                    </div>
+                                </div>
+                                <div id="wp-post-list" class="space-y-2 min-h-[100px]"></div>
+                            </div>
+                        </div>
+                        <!-- Sidebar -->
+                        <div class="w-full xl:w-80 space-y-6 flex-shrink-0">
+                            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div class="bg-slate-50 px-4 py-3 border-b border-slate-100 font-bold text-sm text-slate-700 flex justify-between items-center"><span>카테고리</span><button type="button" onclick="kAdmin.refreshCategories()" class="text-slate-400 hover:text-blue-500"><i class="fas fa-sync-alt"></i></button></div>
+                                <div class="p-4 space-y-3">
+                                    <select id="wp-category-select" class="input-modern"><option value="">Loading...</option></select>
+                                    <div class="text-right"><span class="text-xs text-blue-500 cursor-pointer underline hover:text-blue-700" onclick="document.getElementById('wp-new-cat-box').classList.toggle('hidden')">+ 새 카테고리</span></div>
+                                    <div id="wp-new-cat-box" class="hidden bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2"><input type="text" id="wp-new-cat-name" class="input-modern text-sm" placeholder="새 카테고리 이름"><button type="button" onclick="kAdmin.createCategory()" class="btn btn-secondary btn-xs w-full">추가하기</button></div>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div class="bg-slate-50 px-4 py-3 border-b border-slate-100 font-bold text-sm text-slate-700">발행 (Publish)</div>
+                                <div class="p-4 space-y-4">
+                                    <button type="button" id="btn-publish" onclick="kAdmin.publishWP(event)" class="btn btn-primary w-full py-3">워드프레스 발행</button>
+                                    <button type="button" id="btn-update" onclick="kAdmin.updateWP(event)" class="hidden btn btn-primary w-full py-3 bg-blue-600 border-blue-600 hover:bg-blue-700">수정 내용 저장</button>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div class="bg-slate-50 px-4 py-3 border-b border-slate-100 font-bold text-sm text-slate-700">특성 이미지 (Featured)</div>
+                                <div class="p-4">
+                                    <div class="cursor-pointer group relative" onclick="kAdmin.openImagePicker('wp-featured-img')">
+                                        <div class="aspect-video bg-slate-100 rounded-lg overflow-hidden border border-dashed border-slate-300 flex items-center justify-center group-hover:border-blue-500 transition" id="wp-feat-preview-container">
+                                            <img id="wp-feat-preview" class="w-full h-full object-cover hidden">
+                                            <div id="wp-feat-placeholder" class="text-center text-slate-400 group-hover:text-blue-500"><i class="fas fa-image text-2xl mb-2"></i><p class="text-xs">이미지 설정</p></div>
+                                        </div>
+                                        <input type="hidden" id="wp-featured-img"><input type="hidden" id="wp-featured-url"> 
+                                    </div>
+                                    <button type="button" onclick="kAdmin.removeFeaturedImage(event)" class="text-xs text-red-400 hover:text-red-600 mt-2 underline w-full text-right" id="remove-feat-btn" style="display:none;">이미지 제거</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- [PANEL 3-5] Design & Settings -->
+            <div id="panel-hero" class="panel-content hidden">
+                 <h1 class="text-3xl font-bold mb-8 text-slate-900 m-0">Design Configuration</h1>
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 mb-8">
+                    <h2 class="text-xl font-bold mb-6 pb-4 border-b border-slate-100 m-0">Hero Section</h2>
+                    <div class="space-y-6">
+                        <div><label class="label-modern">Top Label</label><input type="text" id="hero-label" class="input-modern"></div>
+                        <div><label class="label-modern">Title (HTML)</label><textarea id="hero-title" class="input-modern h-24 font-serif text-2xl"></textarea></div>
+                        <div><label class="label-modern">Subtitle</label><textarea id="hero-subtitle" class="input-modern h-20"></textarea></div>
+                        <div class="cursor-pointer" onclick="kAdmin.openImagePicker('hero-bg')"><label class="label-modern">Background Image</label><input type="text" id="hero-bg" class="input-modern" readonly></div>
+                        <div class="text-right"><button onclick="kAdmin.saveHero()" class="btn btn-primary">저장</button></div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                    <h2 class="text-xl font-bold mb-6 pb-4 border-b border-slate-100 m-0">Footer</h2>
+                    <div class="space-y-6">
+                        <div><label class="label-modern">Info Text</label><textarea id="footer-text" class="input-modern h-24"></textarea></div>
+                        <div><label class="label-modern">Copyright</label><input type="text" id="footer-copy" class="input-modern"></div>
+                        <div class="text-right"><button onclick="kAdmin.saveFooter()" class="btn btn-primary">저장</button></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="panel-instagram" class="panel-content hidden">
+                 <header class="mb-8"><h1 class="text-3xl font-bold mb-2 text-slate-900 m-0">Instagram Feed</h1></header>
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                    <div class="mb-8 pb-8 border-b border-slate-100 bg-slate-50 p-4 rounded-lg">
+                        <label class="label-modern">Instagram ID</label><div class="flex gap-2"><input type="text" id="insta-id" class="input-modern"><button onclick="window.open('https://instagram.com/' + document.getElementById('insta-id').value)" class="btn btn-secondary">Check</button></div>
+                    </div>
+                    <div class="grid grid-cols-4 gap-4 mb-8">
+                        <div class="cursor-pointer" onclick="kAdmin.openImagePicker('insta-1')"><label class="text-xs mb-1 block">Image 1</label><div class="aspect-square bg-slate-100 rounded border"><img id="preview-insta-1" class="w-full h-full object-cover hidden"><input type="hidden" id="insta-1"></div></div>
+                        <div class="cursor-pointer" onclick="kAdmin.openImagePicker('insta-2')"><label class="text-xs mb-1 block">Image 2</label><div class="aspect-square bg-slate-100 rounded border"><img id="preview-insta-2" class="w-full h-full object-cover hidden"><input type="hidden" id="insta-2"></div></div>
+                        <div class="cursor-pointer" onclick="kAdmin.openImagePicker('insta-3')"><label class="text-xs mb-1 block">Image 3</label><div class="aspect-square bg-slate-100 rounded border"><img id="preview-insta-3" class="w-full h-full object-cover hidden"><input type="hidden" id="insta-3"></div></div>
+                        <div class="cursor-pointer" onclick="kAdmin.openImagePicker('insta-4')"><label class="text-xs mb-1 block">Image 4</label><div class="aspect-square bg-slate-100 rounded border"><img id="preview-insta-4" class="w-full h-full object-cover hidden"><input type="hidden" id="insta-4"></div></div>
+                    </div>
+                    <button onclick="kAdmin.saveInsta()" class="btn btn-primary w-full py-4">저장</button>
+                </div>
+            </div>
+
+            <div id="panel-settings" class="panel-content hidden">
+                <h1 class="text-3xl font-bold mb-8 text-slate-900 m-0">Settings</h1>
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 mb-8">
+                    <h2 class="font-bold text-lg mb-4 m-0">WordPress Connection</h2>
+                    <div class="space-y-5">
+                        <div><label class="label-modern">Site URL</label><input type="text" id="set-wp-url" class="input-modern"></div>
+                        <div><label class="label-modern">Username</label><input type="text" id="set-wp-user" class="input-modern"></div>
+                        <div><label class="label-modern">App Password</label><input type="password" id="set-wp-pass" class="input-modern"></div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                    <h2 class="font-bold text-lg mb-4 m-0">Unsplash API</h2>
+                    <div><label class="label-modern">Access Key</label><input type="password" id="set-unsplash-key" class="input-modern"></div>
+                    <div class="text-right mt-8"><button onclick="kAdmin.saveSettings()" class="btn btn-primary px-8">저장</button></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- [MODAL] Image Picker -->
+    <div id="img-modal" class="hidden absolute top-0 left-0 w-full h-full z-50 flex items-center justify-center">
+        <div class="absolute w-full h-full bg-slate-900/60 backdrop-blur-sm" onclick="kAdmin.closeImagePicker()"></div>
+        <div class="bg-white w-full max-w-4xl h-[90%] mx-4 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col relative">
+            <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-white z-10">
+                <p class="text-lg font-bold m-0">Media Library</p>
+                <button class="text-slate-400 hover:text-slate-900 transition" onclick="kAdmin.closeImagePicker()"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div class="flex-1 overflow-y-auto bg-slate-50 p-6">
+                <div class="flex justify-center mb-6">
+                    <div class="bg-white p-1 rounded-lg border border-slate-200 inline-flex shadow-sm">
+                        <button onclick="kAdmin.switchImgTab('upload')" id="tab-upload" class="px-6 py-2 rounded-md text-sm font-bold transition bg-slate-900 text-white shadow border-0">Upload (WP)</button>
+                        <button onclick="kAdmin.switchImgTab('stock')" id="tab-stock" class="px-6 py-2 rounded-md text-sm font-bold text-slate-500 hover:bg-slate-50 transition border-0">Stock Images</button>
+                        <button onclick="kAdmin.switchImgTab('url')" id="tab-url" class="px-6 py-2 rounded-md text-sm font-bold text-slate-500 hover:bg-slate-50 transition border-0">Direct URL</button>
+                    </div>
+                </div>
+                <div id="img-panel-upload" class="h-full flex flex-col items-center justify-center min-h-[300px]">
+                    <div class="w-full max-w-lg border-2 border-dashed border-slate-300 rounded-xl p-12 text-center hover:border-blue-500 hover:bg-blue-50 transition cursor-pointer relative group">
+                        <input type="file" id="wp-file-input" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="kAdmin.handleFileUpload(this)">
+                        <div class="pointer-events-none"><i class="fas fa-cloud-upload-alt text-5xl text-slate-300 group-hover:text-blue-500 mb-4 transition"></i><h3 class="text-lg font-bold text-slate-700 m-0">Click to upload</h3></div>
+                        <p id="upload-status" class="absolute bottom-4 left-0 w-full text-center text-sm font-bold text-blue-600 m-0"></p>
+                    </div>
+                </div>
+                <div id="img-panel-stock" class="hidden flex flex-col h-full">
+                    <div class="flex gap-2 mb-6 max-w-lg mx-auto w-full flex-shrink-0">
+                        <input type="text" id="stock-search-q" class="input-modern" placeholder="Search..." onkeydown="if(event.key === 'Enter') kAdmin.searchUnsplash()">
+                        <button onclick="kAdmin.searchUnsplash()" class="btn btn-primary">Search</button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto min-h-[400px]">
+                        <div id="stock-results" class="grid grid-cols-2 md:grid-cols-4 gap-4 p-1"></div>
+                        <div id="stock-load-more" class="hidden text-center py-6"><button onclick="kAdmin.searchUnsplash(true)" class="btn btn-secondary w-full max-w-xs shadow-sm"><i class="fas fa-arrow-down mr-2"></i> 더 보기</button></div>
+                    </div>
+                </div>
+                <div id="img-panel-url" class="hidden flex flex-col items-center pt-10">
+                    <div class="w-full max-w-lg bg-white p-6 rounded-xl border border-slate-200">
+                        <input type="text" id="manual-url-input" class="input-modern mb-4" placeholder="https://...">
+                        <button onclick="kAdmin.selectUrl(document.getElementById('manual-url-input').value)" class="btn btn-primary w-full">Select</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- [AI Writer Modal] -->
+    <div id="ai-modal" class="hidden absolute top-0 left-0 w-full h-full z-50 flex items-center justify-center">
+        <div class="absolute w-full h-full bg-slate-900/60 backdrop-blur-sm" onclick="kAdmin.closeAIModal()"></div>
+        <div class="bg-white w-full max-w-md p-8 rounded-2xl shadow-2xl z-50 relative border border-white/20">
+            <button class="absolute top-4 right-4 text-slate-400 hover:text-slate-900" onclick="kAdmin.closeAIModal()"><i class="fas fa-times"></i></button>
+            <div class="text-center mb-6"><h3 class="text-2xl font-bold text-slate-900 m-0">AI Auto-Journalist</h3></div>
+            <div class="space-y-4">
+                <input type="text" id="ai-keyword" class="input-modern text-lg text-center" placeholder="e.g. Han River Picnic">
+                <button onclick="kAdmin.generateAIContent()" id="btn-ai-gen" class="btn btn-gradient w-full py-4 text-lg font-bold shadow-xl">Generate Article</button>
+                <p id="ai-status" class="text-center text-sm text-indigo-600 font-medium h-6"></p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- [v3.9] SEO Advisor Modal -->
+    <div id="seo-modal" class="hidden absolute top-0 left-0 w-full h-full z-50 flex items-center justify-center">
+        <div class="absolute w-full h-full bg-slate-900/60 backdrop-blur-sm" onclick="kAdmin.closeSEOModal()"></div>
+        <div class="bg-white w-full max-w-lg p-8 rounded-2xl shadow-2xl z-50 relative border border-white/20 max-h-[90vh] overflow-y-auto">
+            <button class="absolute top-4 right-4 text-slate-400 hover:text-slate-900" onclick="kAdmin.closeSEOModal()"><i class="fas fa-times"></i></button>
+            <div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
+                <div class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center font-bold text-xl"><i class="fas fa-search-plus"></i></div>
+                <div><h3 class="text-xl font-bold text-slate-900 m-0">SEO Advisor</h3><p class="text-xs text-slate-500 m-0">Powered by Gemini</p></div>
+            </div>
+            <div id="seo-content" class="space-y-4">
+                <div class="animate-pulse space-y-3">
+                    <div class="h-4 bg-slate-200 rounded w-3/4"></div><div class="h-4 bg-slate-200 rounded w-1/2"></div><div class="h-32 bg-slate-100 rounded"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script>
+        // Ensure Global Scope Access immediately
+        window.kAdmin = window.kAdmin || {};
+
+        (function() {
+            const firebaseConfig = { apiKey: "AIzaSyBGRa_szSMowlwQwCxPLZsOcmV0qNbJ7-Y", authDomain: "thek-edit.firebaseapp.com", projectId: "thek-edit", storageBucket: "thek-edit.firebasestorage.app", messagingSenderId: "117759852953", appId: "1:117759852953:web:75096220a1441126d69308" };
+            const geminiApiKey = (window.KEDIT_GEMINI_KEY || '').trim();
+            
+            let db; let quill; let activeInputId = null; 
+            const getContainer = () => document.getElementById('k-admin-wrapper');
+            let sortableInstance = null; let unsplashPage = 1; let itinCount = 0; let categoriesLoaded = false;
+
+            function getAuthHeader(user, pass) { return 'Basic ' + btoa(unescape(encodeURIComponent(user + ':' + pass))); }
+            function escapeHTML(str) { return String(str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s])); }
+            function sanitizeHTML(html) {
+                if (typeof DOMPurify === 'undefined') return html;
+                return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['h1','h2','h3','p','ul','ol','li','strong','em','b','i','a','img','blockquote','br'], ALLOWED_ATTR: ['href','src','alt','title','style','target','rel'] });
+            }
+
+            function init() {
+                if(typeof firebase === 'undefined' || typeof Quill === 'undefined' || typeof Sortable === 'undefined') { setTimeout(init, 500); return; }
+                try {
+                    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+                    db = firebase.firestore();
+                    firebase.auth().signInAnonymously().then(() => {
+                        const c = getContainer();
+                        if(c) {
+                            c.querySelector('#status-text').innerText = "Connected"; 
+                            c.querySelector('#status-text').className = "text-green-600";
+                            c.querySelector('#status-dot').className = "w-2 h-2 rounded-full bg-green-500";
+                            kAdmin.loadSettings(); kAdmin.loadDesignConfig();
+                        }
+                    }).catch(e => console.error("Firebase Auth Error", e));
+                    quill = new Quill('#wp-editor', { theme: 'snow', modules: { toolbar: [ [{ 'header': [1, 2, false] }], ['bold', 'italic', 'underline', 'link', 'blockquote'], [{ 'list': 'ordered'}, { 'list': 'bullet' }], ['clean'] ] } });
+                } catch(e) { console.error("Init Error", e); }
+            }
+
+            kAdmin.nav = function(id) {
+                const c = getContainer();
+                c.querySelectorAll('.panel-content').forEach(p => { p.classList.add('hidden'); p.classList.remove('block'); });
+                const target = c.querySelector('#panel-' + id);
+                if(target) { target.classList.remove('hidden'); target.classList.add('block'); target.classList.remove('fade-in'); void target.offsetWidth; target.classList.add('fade-in'); }
+                c.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+                const navItem = c.querySelector('#nav-' + id); if(navItem) navItem.classList.add('active');
+                if(id === 'journal') { if(!categoriesLoaded) kAdmin.refreshCategories(); kAdmin.loadPosts(); }
+            };
+
+            // [v3.11] Post Reorder Logic (menu_order based)
+            kAdmin.savePostOrder = async function() { const c = getContainer(); const list = c.querySelector('#wp-post-list'); const items = list.querySelectorAll('.post-card'); const url = c.querySelector('#set-wp-url').value; const user = c.querySelector('#set-wp-user').value; const pass = c.querySelector('#set-wp-pass').value; if(!confirm(`순서를 저장하시겠습니까?\n게시물의 정렬 메타(_kedit_order)가 업데이트됩니다.`)) return; let successCount = 0; for (let i = 0; i < items.length; i++) { const id = items[i].dataset.id; try { const res = await fetch(`${url.replace(/\/$/, "")}/wp-json/wp/v2/posts/${id}`, { method: 'POST', headers: { 'Authorization': getAuthHeader(user, pass), 'Content-Type': 'application/json' }, body: JSON.stringify({ meta: { _kedit_order: i + 1 } }) }); if (res.ok) successCount++; } catch(e) { console.error(e); } } alert(`순서 저장 완료! (${successCount}개 게시물 업데이트)`); kAdmin.loadPosts(); };
+
+            // [v3.9] AI Writer with Image Placeholder Fix
+            kAdmin.generateAIContent = async function() { 
+                const c=getContainer(); const keyword = c.querySelector('#ai-keyword').value; const unsplashKey = c.querySelector('#set-unsplash-key').value; const statusEl = c.querySelector('#ai-status'); const btn = c.querySelector('#btn-ai-gen'); 
+                if(!geminiApiKey) return alert("Gemini API 키가 설정되지 않았습니다. 서버에서 window.KEDIT_GEMINI_KEY로 주입하세요.");
+                if(!keyword) return alert("키워드를 입력해주세요."); if(!unsplashKey) return alert("Unsplash API 키가 필요합니다."); 
+                btn.disabled = true; btn.classList.add('opacity-50'); 
+                
+                try { 
+                    statusEl.innerText = "1. 이미지 검색 및 업로드..."; 
+                    const imgRes = await fetch(`https://api.unsplash.com/search/photos?page=1&per_page=3&query=${keyword}&orientation=landscape&client_id=${unsplashKey}`); 
+                    const imgData = await imgRes.json(); const rawImages = imgData.results.map(img => img.urls.regular); 
+                    
+                    const uploadedImages = []; 
+                    for (const url of rawImages) { 
+                        const media = await kAdmin.uploadRemoteImage(url); 
+                        if (media) uploadedImages.push(media); 
+                    } 
+                    
+                    statusEl.innerText = "2. AI 원고 작성 중..."; 
+                    const prompt = `Write a sophisticated blog post about '${keyword}' for 'THE K-EDIT'. 
+                    Tone: Professional, inviting, curated. 
+                    Format: HTML (h2, p tags only). 
+                    Structure: Title (H1), Intro, [IMG0], Body 1, [IMG1], Body 2, [IMG2], Conclusion. 
+                    IMPORTANT: You MUST insert '[IMG0]', '[IMG1]', '[IMG2]' placeholders exactly where images should appear. Do NOT describe the images, just put the tags.`; 
+                    
+                    const aiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], tools: [{ google_search: {} }] }) }); 
+                    const aiData = await aiRes.json(); 
+                    let content = aiData.candidates?.[0]?.content?.parts?.[0]?.text; 
+                    if(!content) throw new Error("AI 응답 오류"); 
+                    
+                    // Clean up markdown block if present
+                    content = content.replace(/```html/g, '').replace(/```/g, ''); 
+                    
+                    const lines = content.split('\n'); 
+                    let title = lines[0].replace(/<h1>|<\/h1>|#/g, '').trim(); 
+                    let body = lines.slice(1).join('\n'); 
+                    
+                    // Replace Placeholders with Actual Image Tags
+                    uploadedImages.forEach((media, idx) => { 
+                        const imgTag = `<img src="${media.source_url}" alt="${escapeHTML(keyword)}" style="width:100%; border-radius:8px; margin: 20px 0;" />`; 
+                        // Flexible regex to catch [IMG 0], [IMG0], (Image 0) etc.
+                        const regex = new RegExp(`\\[IMG\\s*${idx}\\]`, 'gi');
+                        body = body.replace(regex, imgTag);
+                    }); 
+                    // Remove leftover placeholders
+                    body = body.replace(/\[IMG\s*\d+\]/gi, ''); 
+                    
+                    c.querySelector('#wp-title').value = title; 
+                    quill.root.innerHTML = sanitizeHTML(body); 
+                    
+                    if(uploadedImages.length > 0) { 
+                        kAdmin.selectUrl(uploadedImages[0].source_url, uploadedImages[0].id); 
+                        c.querySelector('#wp-featured-img').value = uploadedImages[0].id; 
+                        c.querySelector('#wp-featured-url').value = uploadedImages[0].source_url; 
+                        c.querySelector('#wp-feat-preview').src = uploadedImages[0].source_url; 
+                        c.querySelector('#wp-feat-preview').classList.remove('hidden'); 
+                        c.querySelector('#wp-feat-placeholder').classList.add('hidden'); 
+                        c.querySelector('#remove-feat-btn').style.display = 'block'; 
+                    } 
+                    alert("글 작성 및 이미지 업로드 완료!"); kAdmin.closeAIModal(); 
+                } catch(e) { console.error(e); alert("오류: " + e.message); } finally { btn.disabled = false; btn.classList.remove('opacity-50'); statusEl.innerText = ""; c.querySelector('#ai-keyword').value = ''; } 
+            };
+
+            // [v3.9] SEO Advisor Logic
+            kAdmin.analyzeSEO = async function() {
+                const c = getContainer();
+                const title = c.querySelector('#wp-title').value;
+                const content = quill.getText();
+                if (!title || content.length < 10) return alert("분석할 내용이 부족합니다.");
+                if (!geminiApiKey) return alert("Gemini API 키가 설정되지 않았습니다. 서버에서 window.KEDIT_GEMINI_KEY로 주입하세요.");
+
+                c.querySelector('#seo-modal').classList.remove('hidden');
+                c.querySelector('#seo-modal').classList.add('flex');
+                c.querySelector('#seo-content').innerHTML = '<div class="text-center py-10 text-slate-500"><i class="fas fa-spinner fa-spin text-2xl mb-2"></i><br>Analyzing Content...</div>';
+
+                const prompt = `Analyze SEO for this blog post. 
+                Title: "${title}"
+                Content Preview: "${content.substring(0, 500)}..."
+                
+                Output JSON format:
+                {
+                    "score": 0-100 score based on title length, keywords, readability,
+                    "suggestions": ["suggestion1", "suggestion2"],
+                    "titles": ["Better Title 1", "Better Title 2", "Better Title 3", "Better Title 4", "Better Title 5"]
+                }`;
+
+                try {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }) });
+                    const data = await res.json();
+                    const result = JSON.parse(data.candidates[0].content.parts[0].text);
+
+                    let html = `
+                        <div class="flex items-center justify-between bg-slate-50 p-4 rounded-lg mb-4">
+                            <span class="font-bold text-slate-700">SEO Score</span>
+                            <span class="text-2xl font-bold ${result.score > 80 ? 'text-green-600' : 'text-orange-500'}">${escapeHTML(result.score)}/100</span>
+                        </div>
+                        <div class="mb-4">
+                            <h4 class="font-bold text-sm text-slate-900 mb-2">\ud83d\udca1 Recommended Titles</h4>
+                            <ul class="space-y-1 text-sm text-slate-600" id="seo-title-list">
+                                ${result.titles.map(t => `<li class="cursor-pointer hover:text-blue-600 hover:bg-blue-50 p-1 rounded" data-title="${escapeHTML(t)}"><i class="fas fa-check-circle text-green-400 mr-2"></i>${escapeHTML(t)}</li>`).join('')}
+                            </ul>
+                        </div>
+                         <div>
+                            <h4 class="font-bold text-sm text-slate-900 mb-2">\ud83d\udd27 Improvement Suggestions</h4>
+                            <ul class="space-y-1 text-sm text-slate-600 list-disc pl-4">
+                                ${result.suggestions.map(s => `<li>${escapeHTML(s)}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `;
+                    c.querySelector('#seo-content').innerHTML = html;
+                    const list = c.querySelector('#seo-title-list');
+                    if (list) {
+                        list.querySelectorAll('li[data-title]').forEach(li => {
+                            li.addEventListener('click', () => {
+                                c.querySelector('#wp-title').value = li.getAttribute('data-title') || '';
+                            });
+                        });
+                    }
+                } catch(e) {
+                    c.querySelector('#seo-content').innerHTML = '<div class="text-red-500">Analysis Failed. Try again.</div>';
+                }
+            };
+            kAdmin.closeSEOModal = function() { getContainer().querySelector('#seo-modal').classList.add('hidden'); getContainer().querySelector('#seo-modal').classList.remove('flex'); };
+
+            // Existing functions
+            kAdmin.loadEdition = function(id) { const c = getContainer(); c.querySelector('#edition-placeholder').classList.add('hidden'); c.querySelector('#edition-form').classList.remove('hidden'); c.querySelector('#ed-id').value = id; c.querySelectorAll('.edition-tab').forEach(t => { t.className = "edition-tab px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:text-slate-900 hover:bg-white transition whitespace-nowrap border border-transparent"; }); c.querySelector('#tab-'+id).className = "edition-tab px-4 py-2 rounded-lg text-sm font-bold bg-white text-slate-900 shadow-sm border border-slate-200 transition whitespace-nowrap"; db.collection('k_editions').doc(id).get().then(doc => { const d = doc.data() || {}; c.querySelector('#ed-title').value = d.title || ''; c.querySelector('#ed-subtitle').value = d.subtitle || ''; c.querySelector('#ed-price').value = d.price || ''; c.querySelector('#ed-points').value = (d.points || []).join('\n'); c.querySelector('#ed-desc').value = d.desc || ''; c.querySelector('#ed-img1').value = d.img1 || ''; c.querySelector('#prev-ed-img1').src = d.img1 || ''; c.querySelector('#ed-img2').value = d.img2 || ''; c.querySelector('#prev-ed-img2').src = d.img2 || ''; const list = c.querySelector('#itin-list'); list.innerHTML = ''; if (d.itinerary && d.itinerary.length > 0) { d.itinerary.forEach(item => kAdmin.addItineraryDay(item)); } else { kAdmin.addItineraryDay({ day: 'Day 1', title: 'Arrival', loc: 'Seoul', desc: 'Welcome to Korea!' }); } }); };
+            kAdmin.saveEdition = function() { const c = getContainer(); const id = c.querySelector('#ed-id').value; if(!id) return; const data = { title: c.querySelector('#ed-title').value, subtitle: c.querySelector('#ed-subtitle').value, price: c.querySelector('#ed-price').value, points: c.querySelector('#ed-points').value.split('\n').filter(x=>x), desc: c.querySelector('#ed-desc').value, img1: c.querySelector('#ed-img1').value, img2: c.querySelector('#ed-img2').value, itinerary: kAdmin.collectItineraryData() }; db.collection('k_editions').doc(id).set(data, {merge:true}).then(() => alert('Saved Successfully!')); };
+            kAdmin.addItineraryDay = function(data = {}) { itinCount++; const list = getContainer().querySelector('#itin-list'); const id = `itin-${itinCount}`; const div = document.createElement('div'); div.className = "bg-slate-50 border border-slate-200 rounded-lg p-4 relative fade-in group"; div.id = id; div.innerHTML = `<div class="flex justify-between items-center mb-4"><div class="font-bold text-slate-700 flex items-center gap-2"><i class="fas fa-bars text-slate-300 cursor-grab"></i> <input type="text" class="bg-transparent border-none font-bold text-sm text-slate-700 focus:outline-none w-20" placeholder="Day 1" value="${escapeHTML(data.day || 'Day ' + itinCount)}"></div><button type="button" onclick="this.closest('.bg-slate-50').remove()" class="text-slate-400 hover:text-red-500 px-2"><i class="fas fa-trash"></i></button></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div><label class="label-modern">Title</label><input type="text" class="input-modern itin-title" value="${escapeHTML(data.title || '')}" placeholder="Title"></div><div><label class="label-modern">Location</label><input type="text" class="input-modern itin-loc" value="${escapeHTML(data.loc || '')}" placeholder="Location"></div><div><label class="label-modern">Stay</label><input type="text" class="input-modern itin-stay" value="${escapeHTML(data.stay || '')}" placeholder="Accommodation"></div><div class="row-span-2"><label class="label-modern">Image</label><div class="cursor-pointer group/img relative h-[126px]" onclick="kAdmin.openImagePicker('${id}-img')"><div class="w-full h-full bg-white border border-slate-200 rounded-lg overflow-hidden flex items-center justify-center hover:border-blue-500 transition"><img id="preview-${id}-img" src="${escapeHTML(data.img || '')}" class="${data.img ? '' : 'hidden'} w-full h-full object-cover"><div class="${data.img ? 'hidden' : ''} text-center text-slate-300 group-hover/img:text-blue-500"><i class="fas fa-image text-2xl"></i></div></div><input type="hidden" id="${id}-img" class="itin-img" value="${escapeHTML(data.img || '')}"></div></div><div><label class="label-modern">Description</label><textarea class="input-modern itin-desc h-[66px] resize-none" placeholder="Details...">${escapeHTML(data.desc || '')}</textarea></div></div>`; list.appendChild(div); };
+            kAdmin.collectItineraryData = function() { const list = getContainer().querySelector('#itin-list'); const items = []; list.querySelectorAll('.bg-slate-50').forEach(el => { items.push({ day: el.querySelector('input[placeholder="Day 1"]').value, title: el.querySelector('.itin-title').value, loc: el.querySelector('.itin-loc').value, stay: el.querySelector('.itin-stay').value, img: el.querySelector('.itin-img').value, desc: el.querySelector('.itin-desc').value }); }); return items; };
+            kAdmin.openImagePicker = function(inputId) { activeInputId = inputId; getContainer().querySelector('#img-modal').classList.remove('hidden'); getContainer().querySelector('#img-modal').classList.add('flex'); };
+            kAdmin.closeImagePicker = function() { getContainer().querySelector('#img-modal').classList.add('hidden'); getContainer().querySelector('#img-modal').classList.remove('flex'); };
+            kAdmin.selectUrl = function(url, id) { if(!activeInputId) return; const c = getContainer(); const input = c.querySelector('#' + activeInputId); if(input) input.value = url; if(activeInputId === 'wp-featured-img') { c.querySelector('#wp-featured-img').value = id || ''; c.querySelector('#wp-featured-url').value = url; c.querySelector('#wp-feat-preview').src = url; c.querySelector('#wp-feat-preview').classList.remove('hidden'); c.querySelector('#wp-feat-placeholder').classList.add('hidden'); c.querySelector('#remove-feat-btn').style.display = 'block'; } else if(activeInputId.startsWith('ed-img')) { c.querySelector('#prev-' + activeInputId).src = url; } else if(activeInputId.startsWith('insta-')) { c.querySelector('#preview-' + activeInputId).src = url; c.querySelector('#preview-' + activeInputId).classList.remove('hidden'); } else if(activeInputId.includes('itin-')) { const prev = c.querySelector('#preview-' + activeInputId); if(prev) { prev.src = url; prev.classList.remove('hidden'); prev.nextElementSibling.classList.add('hidden'); } } kAdmin.closeImagePicker(); };
+            kAdmin.loadPosts = async function() { const c = getContainer(); const url = c.querySelector('#set-wp-url').value; const user = c.querySelector('#set-wp-user').value; const pass = c.querySelector('#set-wp-pass').value; const list = c.querySelector('#wp-post-list'); if(!url) return; list.innerHTML = '<div class="text-center py-4 text-slate-400"><i class="fas fa-spinner fa-spin"></i> Loading...</div>'; try { const baseUrl = `${url.replace(/\/$/, "")}/wp-json/wp/v2/posts?per_page=10&_embed`; let res = await fetch(`${baseUrl}&orderby=meta_value_num&order=asc&meta_key=_kedit_order`, { headers: { 'Authorization': getAuthHeader(user, pass) } }); if (!res.ok) res = await fetch(`${baseUrl}&orderby=date&order=desc`, { headers: { 'Authorization': getAuthHeader(user, pass) } }); const posts = await res.json(); if (!Array.isArray(posts)) throw new Error(posts?.message || "Invalid response format."); list.innerHTML = ''; posts.forEach(p => { let imgUrl = ''; if(p._embedded && p._embedded['wp:featuredmedia'] && p._embedded['wp:featuredmedia'][0]) imgUrl = p._embedded['wp:featuredmedia'][0].source_url; list.innerHTML += `<div class="post-card group" data-id="${p.id}"><div class="handle text-slate-300 hover:text-slate-500 cursor-grab px-2 py-4"><i class="fas fa-grip-lines"></i></div><div class="w-10 h-10 bg-slate-100 rounded overflow-hidden flex-shrink-0 border border-slate-200">${imgUrl ? `<img src="${imgUrl}" class="w-full h-full object-cover">` : '<div class="flex items-center justify-center h-full text-slate-300"><i class="fas fa-image"></i></div>'}</div><div class="flex-1 min-w-0 pl-3" onclick="kAdmin.editPost(${p.id})"><h4 class="font-bold text-sm text-slate-800 truncate group-hover:text-blue-600 transition cursor-pointer">${escapeHTML(p.title.rendered)}</h4><p class="text-xs text-slate-400">${escapeHTML(p.status)} · ${escapeHTML(new Date(p.date).toLocaleDateString())}</p></div></div>`; }); if(sortableInstance) sortableInstance.destroy(); if(typeof Sortable !== 'undefined') { sortableInstance = new Sortable(list, { animation: 150, handle: '.handle', ghostClass: 'sortable-ghost' }); } } catch(e){ list.innerHTML = `<div class="text-center text-red-400 text-sm p-4">Error: ${escapeHTML(e.message)}<br><span class="text-xs text-slate-400">Check WP settings or connection.</span></div>`; } };
+            kAdmin.editPost = async function(id) { const c=getContainer(); const url = c.querySelector('#set-wp-url').value; const user = c.querySelector('#set-wp-user').value; const pass = c.querySelector('#set-wp-pass').value; const res = await fetch(`${url.replace(/\/$/, "")}/wp-json/wp/v2/posts/${id}?_embed`, { headers: { 'Authorization': getAuthHeader(user, pass) } }); const p = await res.json(); c.querySelector('#wp-title').value = p.title.rendered; quill.root.innerHTML = sanitizeHTML(p.content.rendered); c.querySelector('#wp-post-id').value = p.id; if(p.categories && p.categories.length) c.querySelector('#wp-category-select').value = p.categories[0]; c.querySelector('#edit-mode-indicator').classList.remove('hidden'); c.querySelector('#btn-publish').classList.add('hidden'); c.querySelector('#btn-update').classList.remove('hidden'); c.querySelector('#panel-journal').scrollIntoView({ behavior: 'smooth' }); };
+            kAdmin.newPost = function() { const c=getContainer(); c.querySelector('#wp-form').reset(); quill.setContents([]); c.querySelector('#edit-mode-indicator').classList.add('hidden'); c.querySelector('#btn-publish').classList.remove('hidden'); c.querySelector('#btn-update').classList.add('hidden'); c.querySelector('#wp-post-id').value = ''; kAdmin.removeFeaturedImage({stopPropagation:()=>{}, preventDefault:()=>{}}); };
+            kAdmin.updateWP = async function(e) { const c=getContainer(); const id=c.querySelector('#wp-post-id').value; const url=c.querySelector('#set-wp-url').value; const user=c.querySelector('#set-wp-user').value; const pass=c.querySelector('#set-wp-pass').value; const d={ title:c.querySelector('#wp-title').value, content:quill.root.innerHTML }; const cat=c.querySelector('#wp-category-select').value; if(cat) d.categories=[cat]; const feat=c.querySelector('#wp-featured-img').value; if(feat) d.featured_media=parseInt(feat); await fetch(`${url.replace(/\/$/, "")}/wp-json/wp/v2/posts/${id}`, { method:'POST', headers:{'Authorization':getAuthHeader(user,pass),'Content-Type':'application/json'}, body:JSON.stringify(d) }); alert('Updated'); kAdmin.loadPosts(); };
+            kAdmin.publishWP = async function(e) { const c=getContainer(); const url=c.querySelector('#set-wp-url').value; const user=c.querySelector('#set-wp-user').value; const pass=c.querySelector('#set-wp-pass').value; const d={ title:c.querySelector('#wp-title').value, content:quill.root.innerHTML, status:'publish' }; const cat=c.querySelector('#wp-category-select').value; if(cat) d.categories=[cat]; const feat=c.querySelector('#wp-featured-img').value; if(feat) d.featured_media=parseInt(feat); try { const res = await fetch(`${url.replace(/\/$/, "")}/wp-json/wp/v2/posts`, { method:'POST', headers:{'Authorization':getAuthHeader(user,pass),'Content-Type':'application/json'}, body:JSON.stringify(d) }); if(res.ok) { alert('Published Successfully'); kAdmin.newPost(); kAdmin.loadPosts(); } else { const err = await res.json(); alert('Publish Failed: ' + err.message); } } catch(e) { alert('Network Error'); } };
+            kAdmin.refreshCategories = async function() { const c=getContainer(); const url=c.querySelector('#set-wp-url').value; const user=c.querySelector('#set-wp-user').value; const pass=c.querySelector('#set-wp-pass').value; const res=await fetch(`${url.replace(/\/$/, "")}/wp-json/wp/v2/categories?per_page=100`, { headers:{'Authorization':getAuthHeader(user,pass)}}); const cats=await res.json(); const s=c.querySelector('#wp-category-select'); s.innerHTML='<option value="">Uncategorized</option>'; cats.forEach(ca=>s.innerHTML+=`<option value="${ca.id}">${escapeHTML(ca.name)}</option>`); categoriesLoaded = true; };
+            kAdmin.createCategory = async function() { const c=getContainer(); const name = c.querySelector('#wp-new-cat-name').value; const url = c.querySelector('#set-wp-url').value; const user = c.querySelector('#set-wp-user').value; const pass = c.querySelector('#set-wp-pass').value; try { await fetch(`${url.replace(/\/$/, "")}/wp-json/wp/v2/categories`, { method: 'POST', headers: { 'Authorization': getAuthHeader(user, pass), 'Content-Type': 'application/json' }, body: JSON.stringify({ name }), credentials: 'omit' }); kAdmin.refreshCategories(); } catch(e){} };
+            kAdmin.switchImgTab = function(tab) { const c=getContainer(); ['upload', 'stock', 'url'].forEach(t => { c.querySelector('#img-panel-'+t).classList.add('hidden'); c.querySelector('#tab-'+t).className = "px-6 py-2 rounded-md text-sm font-bold text-slate-500 hover:bg-slate-50 transition border-0"; }); c.querySelector('#img-panel-'+tab).classList.remove('hidden'); c.querySelector('#tab-'+tab).className = "px-6 py-2 rounded-md text-sm font-bold transition bg-slate-900 text-white shadow border-0"; };
+            kAdmin.handleFileUpload = async function(input) { const file=input.files[0]; if(!file)return; const c=getContainer(); const url=c.querySelector('#set-wp-url').value; const user=c.querySelector('#set-wp-user').value; const pass=c.querySelector('#set-wp-pass').value; const fd=new FormData(); fd.append('file',file); await fetch(`${url.replace(/\/$/, "")}/wp-json/wp/v2/media`, { method:'POST', headers:{'Authorization':getAuthHeader(user,pass)}, body:fd }).then(r=>r.json()).then(d=>kAdmin.selectUrl(d.source_url, d.id)); };
+            kAdmin.removeFeaturedImage = function(e) { e.stopPropagation(); e.preventDefault(); const c=getContainer(); c.querySelector('#wp-featured-img').value = ''; c.querySelector('#wp-featured-url').value = ''; c.querySelector('#wp-feat-preview').classList.add('hidden'); c.querySelector('#wp-feat-placeholder').classList.remove('hidden'); c.querySelector('#remove-feat-btn').style.display = 'none'; };
+            kAdmin.loadSettings = function() { db.collection('k_site_config').doc('settings').get().then(doc => { if(doc.exists) { const d=doc.data(); const c=getContainer(); c.querySelector('#set-wp-url').value=d.wp_url||''; c.querySelector('#set-wp-user').value=d.wp_user||''; c.querySelector('#set-wp-pass').value=d.wp_pass||''; c.querySelector('#set-unsplash-key').value=d.unsplash_key||''; } }); };
+            kAdmin.saveSettings = function() { const c=getContainer(); db.collection('k_site_config').doc('settings').set({ wp_url:c.querySelector('#set-wp-url').value, wp_user:c.querySelector('#set-wp-user').value, wp_pass:c.querySelector('#set-wp-pass').value, unsplash_key:c.querySelector('#set-unsplash-key').value }, {merge:true}).then(()=>alert('Saved')); };
+            kAdmin.loadDesignConfig = function() { const c=getContainer(); db.collection('k_site_config').doc('hero').get().then(doc=>{if(doc.exists) {const d=doc.data(); c.querySelector('#hero-label').value=d.label||''; c.querySelector('#hero-title').value=d.title||''; c.querySelector('#hero-subtitle').value=d.subtitle||''; c.querySelector('#hero-bg').value=d.bgImage||''; }}); db.collection('k_site_config').doc('instagram').get().then(doc=>{if(doc.exists){ const d=doc.data(); c.querySelector('#insta-id').value=d.insta_id||''; for(let i=1;i<=4;i++) if(d['img'+i]) { c.querySelector('#insta-'+i).value=d['img'+i]; c.querySelector('#preview-insta-'+i).src=d['img'+i]; c.querySelector('#preview-insta-'+i).classList.remove('hidden'); } }}); };
+            kAdmin.saveHero = function() { const c=getContainer(); db.collection('k_site_config').doc('hero').set({label:c.querySelector('#hero-label').value, title:c.querySelector('#hero-title').value, subtitle:c.querySelector('#hero-subtitle').value, bgImage:c.querySelector('#hero-bg').value}, {merge:true}); alert('Saved'); };
+            kAdmin.saveFooter = function() { const c=getContainer(); db.collection('k_site_config').doc('footer').set({text:c.querySelector('#footer-text').value, copyright:c.querySelector('#footer-copy').value}, {merge:true}); alert('Saved'); };
+            kAdmin.saveInsta = function() { const c=getContainer(); const d={insta_id:c.querySelector('#insta-id').value}; for(let i=1;i<=4;i++) d['img'+i]=c.querySelector('#insta-'+i).value; db.collection('k_site_config').doc('instagram').set(d, {merge:true}); alert('Saved'); };
+            kAdmin.testConnection = async function() { const c=getContainer(); const url = c.querySelector('#set-wp-url').value; const user = c.querySelector('#set-wp-user').value; const pass = c.querySelector('#set-wp-pass').value; if(!url || !user || !pass) return alert("Input all fields"); try { const res = await fetch(`${url.replace(/\/$/, "")}/wp-json/wp/v2/users/me`, { method: 'GET', headers: { 'Authorization': getAuthHeader(user, pass) }, credentials: 'omit' }); if(res.ok) { alert("Connected!"); } else { alert("Failed: " + res.status); } } catch(e) { alert("Error: " + e); } };
+            kAdmin.searchUnsplash = async function(isLoadMore = false) { const c=getContainer(); const query = c.querySelector('#stock-search-q').value; const key = c.querySelector('#set-unsplash-key').value; const resContainer = c.querySelector('#stock-results'); const loadMoreBtn = c.querySelector('#stock-load-more'); if(!isLoadMore) { unsplashPage = 1; resContainer.innerHTML = 'Loading...'; } else unsplashPage++; if(!key) { if(!isLoadMore) resContainer.innerHTML = 'Set API Key'; return; } try { const res = await fetch(`https://api.unsplash.com/search/photos?page=${unsplashPage}&per_page=12&query=${query}&client_id=${key}`); const data = await res.json(); if(!isLoadMore) resContainer.innerHTML = ''; data.results.forEach(img => { resContainer.innerHTML += `<div class="aspect-square bg-slate-200 cursor-pointer hover:opacity-80 relative group" onclick="kAdmin.selectAndUploadUnsplash('${img.urls.regular}')"><img src="${img.urls.small}" class="w-full h-full object-cover"></div>`; }); if(data.total_pages > unsplashPage) loadMoreBtn.classList.remove('hidden'); else loadMoreBtn.classList.add('hidden'); } catch(e) { resContainer.innerHTML = 'Error'; } };
+            kAdmin.uploadRemoteImage = async function(url) { const c=getContainer(); const wpUrl = c.querySelector('#set-wp-url').value; const user = c.querySelector('#set-wp-user').value; const pass = c.querySelector('#set-wp-pass').value; try { const response = await fetch(url); const blob = await response.blob(); const filename = `unsplash-${Date.now()}.jpg`; const file = new File([blob], filename, { type: "image/jpeg" }); const formData = new FormData(); formData.append('file', file); const res = await fetch(`${wpUrl.replace(/\/$/, "")}/wp-json/wp/v2/media`, { method: 'POST', headers: { 'Authorization': getAuthHeader(user, pass) }, body: formData, credentials: 'omit' }); return await res.json(); } catch (e) { console.error("Upload Failed", e); return null; } };
+            kAdmin.selectAndUploadUnsplash = async function(url) { if (activeInputId === 'wp-featured-img') { const c=getContainer(); const modalOverlay = c.querySelector('#img-modal .bg-white'); modalOverlay.style.opacity = '0.5'; modalOverlay.style.pointerEvents = 'none'; try { const media = await kAdmin.uploadRemoteImage(url); if (media && media.source_url) kAdmin.selectUrl(media.source_url, media.id); else alert("Failed to upload image."); } finally { modalOverlay.style.opacity = '1'; modalOverlay.style.pointerEvents = 'auto'; } } else kAdmin.selectUrl(url); };
+            kAdmin.openAIModal = function() { const c=getContainer(); c.querySelector('#ai-modal').classList.remove('hidden'); c.querySelector('#ai-modal').classList.add('flex'); };
+            kAdmin.closeAIModal = function() { const c=getContainer(); c.querySelector('#ai-modal').classList.add('hidden'); c.querySelector('#ai-modal').classList.remove('flex'); };
+
+            init();
+        })();
+    </script>
+</div>
